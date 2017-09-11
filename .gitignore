@@ -1,0 +1,12 @@
+/.idea
+*.iml
+*.iws
+*.ipr
+/.gradle
+/build
+/captures
+*.DS_Store
+/.vscode
+/.project
+/.settings
+gradle.properties

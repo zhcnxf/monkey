@@ -1,0 +1,90 @@
+import java.util.concurrent.CountDownLatch
+
+configurations { antClasspath }
+
+afterEvaluate {
+    ClassLoader antClassLoader = org.apache.tools.ant.Project.class.classLoader
+    configurations.antClasspath.each { File jar ->
+        antClassLoader.addURL(jar.toURI().toURL())
+    }
+}
+
+def packageSpec = ['com.p1.mobile.putong'].collect({ p -> "-p $p" }).join(' ')
+def seed = new Random().nextInt().abs()
+
+task('monkey').doLast {
+    def devices = []
+
+    if (devices == null || devices.size == 0) {
+        devices = []
+        "$adb devices -l".execute().text.eachLine { line, index ->
+            if (index > 0 && !line.isEmpty()) {
+                def d = [:]
+                line.split(/ +/).eachWithIndex { l, i ->
+                    if (i == 0) {
+                        d.id = l
+                    } else if (i == 1) {
+                        d.type = l
+                    } else {
+                        def (k, v) = l.split(/:/)
+                        d[k] = v
+                    }
+                }
+                devices.push(d)
+            }
+        }
+    }
+
+    if (devices.size() == 0) {
+        println 'No connected devices'
+        return
+    }
+
+    new File("$project.buildDir/reports/monkey").mkdirs()
+
+    def counter = new CountDownLatch(devices.size())
+    devices.each { d ->
+        Thread.start {
+            try {
+                def cmd = "$adb -s $d.id shell monkey $packageSpec -v $events -s $seed"
+                def proc = cmd.execute()
+
+                def logFile = "$project.buildDir/reports/monkey/log-${d.model}-${d.product}-${d.id}-s${seed}.txt"
+                def log = new File(logFile).newPrintWriter()
+                log.println(cmd)
+                proc.inputStream.eachLine { log.println(it) }
+                log.close()
+
+                def errFile = "$project.buildDir/reports/monkey/err-${d.model}-${d.product}-${d.id}-s${seed}.txt"
+                def err = new File(errFile).newPrintWriter()
+                err.println(cmd)
+                proc.errorStream.eachLine { err.println(it) }
+                err.close()
+
+                if (developers != null && "$developers" != "") {
+                    ant.mail(mailhost: "$mailHost", user: "$mailUser", password: "$mailPassword", subject: "Monkey report", files: "$logFile, $errFile") {
+                        from(address: "$mailUser", name: 'Monkey')
+                        developers.split(',').each { email ->
+                            to(address: email)
+                        }
+                        message("Monkey report.\n")
+                    }
+                }
+            } finally {
+                counter.countDown()
+            }
+        }
+    }
+
+    counter.await()
+}
+
+repositories {
+    jcenter()
+}
+
+dependencies {
+    antClasspath 'ant:ant-javamail:1.6.5'
+    antClasspath 'javax.activation:activation:1.1.1'
+    antClasspath 'javax.mail:mail:1.4.7'
+}
